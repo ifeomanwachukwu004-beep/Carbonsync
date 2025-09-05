@@ -122,3 +122,88 @@
     cumulative-co2-offset: uint
   }
 )
+
+
+
+;; read only functions
+
+;; Get carbon credit balance
+(define-read-only (get-balance (account principal))
+  (ok (ft-get-balance carbon-credit account)))
+
+;; Get project details
+(define-read-only (get-project (project-id uint))
+  (map-get? carbon-projects { project-id: project-id }))
+
+;; Get credit details
+(define-read-only (get-credit (credit-id uint))
+  (map-get? carbon-credits { credit-id: credit-id }))
+
+;; Get marketplace listing
+(define-read-only (get-listing (listing-id uint))
+  (map-get? marketplace-listings { listing-id: listing-id }))
+
+;; Get project verification status
+(define-read-only (get-project-verification (project-id uint))
+  (map-get? project-verifications { project-id: project-id }))
+
+;; Get corporate ESG data
+(define-read-only (get-corporate-esg (company principal))
+  (map-get? corporate-esg { company: company }))
+
+;; Get sensor reading
+(define-read-only (get-sensor-reading (sensor-id (string-ascii 64)) (timestamp uint))
+  (map-get? sensor-readings { sensor-id: sensor-id, timestamp: timestamp }))
+
+;; Get contract statistics
+(define-read-only (get-contract-stats)
+  {
+    total-credits-issued: (var-get total-credits-issued),
+    total-credits-retired: (var-get total-credits-retired),
+    total-projects: (- (var-get next-project-id) u1),
+    contract-paused: (var-get contract-paused)
+  })
+
+;; Calculate ESG score based on carbon activity
+(define-read-only (calculate-esg-score (company principal))
+  (let
+    ((esg-data (default-to 
+                 { total-credits-purchased: u0, total-credits-retired: u0, esg-score: u0, last-updated: u0 }
+                 (map-get? corporate-esg { company: company }))))
+    (if (> (get total-credits-purchased esg-data) u0)
+      (if (> (/ (* (get total-credits-retired esg-data) u100) (get total-credits-purchased esg-data)) u100)
+        u100
+        (/ (* (get total-credits-retired esg-data) u100) (get total-credits-purchased esg-data)))
+      u0)))
+
+;; private functions
+
+;; Update corporate ESG tracking for purchases
+(define-private (update-corporate-esg (company principal) (amount uint))
+  (let
+    ((current-esg (default-to 
+                   { total-credits-purchased: u0, total-credits-retired: u0, esg-score: u0, last-updated: u0 }
+                   (map-get? corporate-esg { company: company }))))
+    (map-set corporate-esg
+      { company: company }
+      (merge current-esg {
+        total-credits-purchased: (+ (get total-credits-purchased current-esg) amount),
+        last-updated: u0,
+        esg-score: (calculate-esg-score company)
+      }))
+    true))
+
+;; Update corporate ESG tracking for retirements
+(define-private (update-corporate-esg-retirement (company principal) (amount uint))
+  (let
+    ((current-esg (default-to 
+                   { total-credits-purchased: u0, total-credits-retired: u0, esg-score: u0, last-updated: u0 }
+                   (map-get? corporate-esg { company: company }))))
+    (map-set corporate-esg
+      { company: company }
+      (merge current-esg {
+        total-credits-retired: (+ (get total-credits-retired current-esg) amount),
+        last-updated: u0,
+        esg-score: (calculate-esg-score company)
+      }))
+    true))
